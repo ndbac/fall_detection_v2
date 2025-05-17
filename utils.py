@@ -418,10 +418,10 @@ class FeatureExtractor:
 
     def realTimeVideo(self, video, cost_method, save=False):
         """
-        Process a video file and detect falls in real-time.
+        Process a video file or webcam stream and detect falls in real-time.
         
         Args:
-            video (str): Path to the video file
+            video (str): Path to the video file or "webcam:N" for camera input (where N is camera ID)
             cost_method (str): Method to use for cost calculation
                                Options: "DifferenceMean", "MeanDifference", "DifferenceSum", "Division", "Mean"
             save (bool): Whether to save the processed video with annotations
@@ -431,26 +431,45 @@ class FeatureExtractor:
             str: Error message if processing fails
         """
         plot = plt.figure(figsize=(5, 5))
-        camera_video = cv2.VideoCapture(video)  # Capture the video
         
-        # Check if video opened successfully
+        # Check if webcam is requested
+        if video.startswith("webcam:"):
+            try:
+                camera_id = int(video.split(":")[-1])
+                print(f"Opening webcam with ID {camera_id}")
+                camera_video = cv2.VideoCapture(camera_id)
+                output_path = f"webcam_fall_detection_{cost_method}.mp4" if save else None
+            except ValueError:
+                return "Error: Invalid webcam ID format. Use 'webcam:N' where N is an integer"
+        else:
+            # Regular video file
+            camera_video = cv2.VideoCapture(video)
+            output_path = video.rsplit('.', 1)[0] + f"_fall_detected_{cost_method}.mp4" if save else None
+        
+        # Check if video/webcam opened successfully
         if not camera_video.isOpened():
-            return "Error: Could not open video file"
+            return "Error: Could not open video source"
             
-        camera_video.set(3, 1280)  # Width of the video
-        camera_video.set(4, 960)  # Height of the video
+        # Get video properties
+        frame_width = int(camera_video.get(cv2.CAP_PROP_FRAME_WIDTH))
+        frame_height = int(camera_video.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        camera_video.set(3, min(1280, frame_width))  # Width of the video
+        camera_video.set(4, min(960, frame_height))  # Height of the video
 
-        if save:
+        if save and output_path:
             fourcc = cv2.VideoWriter_fourcc(*"MP4V")
-            output_path = video.rsplit('.', 1)[0] + "_fall_detected.mp4"
             out = cv2.VideoWriter(
                 output_path, fourcc, 6.0, (int(camera_video.get(3)) + 500, 500)
             )
 
         video_fps = round(camera_video.get(cv2.CAP_PROP_FPS))  # Get the fps of the video
         
+        # For webcam if FPS is very low (like 0), set a reasonable default
+        if video_fps < 1 and video.startswith("webcam:"):
+            video_fps = 30
+            
         # Automatically adjust for different FPS videos
-        if video_fps < 5:
+        if video_fps < 5 and not video.startswith("webcam:"):
             return "Error: Video FPS too low (less than 5)"
             
         # Calculate appropriate step size based on video FPS
@@ -498,8 +517,6 @@ class FeatureExtractor:
                         frame_index += 1
                         continue
 
-                    start = time.time()  # Calculate the time for the cost computation
-
                     # Calculate cost based on the selected method
                     if cost_method == "DifferenceMean":
                         cost = self.differenceMean(vector1_angles, vector2_angles)
@@ -514,14 +531,12 @@ class FeatureExtractor:
                     else:
                         return f"Error: Invalid method '{cost_method}'. Use 'DifferenceMean', 'MeanDifference', 'DifferenceSum', 'Division' or 'Mean'"
 
-                    end = time.time()
-
                     if np.isnan(cost):  # If cost is NaN, take previous cost instead of NaN
                         cost = previous_cost
 
                     cache.append(cost)  # Append the cost to cache
 
-                    cache_size = min(6, step_size * 6 // video_fps)
+                    cache_size = min(6, step_size * 6 // max(1, video_fps))
                     if (frame_index >= step_size * cache_size):  # If the cache contains enough elements
                         cache_weights = np.ones((1, len(cache))) / len(cache)
                         weighted_cost = np.dot(cache_weights, cache)  # Calculate the cost based on previous costs
@@ -538,9 +553,12 @@ class FeatureExtractor:
                     fall_status = "FALL DETECTED!" if (len(self.costlist) > 0 and self.costlist[-1] > threshold) else "No Fall"
                     fall_color = (0, 0, 255) if fall_status == "FALL DETECTED!" else (0, 255, 0)
                     
+                    # Source indicator (webcam or video file)
+                    source_type = "Webcam" if video.startswith("webcam:") else "Video"
+                    
                     cv2.putText(
                         frame,
-                        f"Frame: {frame_index//step_size} | {fall_status}",
+                        f"{source_type} | Frame: {frame_index//step_size} | {fall_status}",
                         (10, 30),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.7,
@@ -563,16 +581,17 @@ class FeatureExtractor:
                         )
 
                     plt.clf()  # Clear the plot
-                    plt.xlim(frame_index // step_size - 15, frame_index // step_size + 15)  # Define the limit of x axis
+                    plt.xlim(max(0, len(self.costlist) - 30), max(30, len(self.costlist) + 5))  # Define the limit of x axis
                     plt.ylim(0, self.threshold + 50)  # Define the limit of y axis
                     plt.plot(self.costlist)  # Plot the costlist
                     plt.title(f"Fall Detection - {cost_method} Method")
                     plt.xlabel("Frame")
                     plt.ylabel("Cost")
                     
-                    x_cord = [frame_index // step_size - 15, frame_index // step_size + 15]  # The threshold x cord
-                    y_cord = [threshold, threshold]  # The threshold y cord
-                    plt.plot(x_cord, y_cord, color="red", linestyle="--", label="Threshold")  # Plot the threshold line
+                    # Plot threshold line covering the visible x-range
+                    x_range = plt.xlim()
+                    plt.plot(x_range, [threshold, threshold], color="red", linestyle="--", label="Threshold")  # Plot the threshold line
+                    
                     if len(self.costlist) > 0:
                         plt.scatter(len(self.costlist)-1, self.costlist[-1], color="purple", s=50)  # Mark current point
                     
@@ -589,7 +608,7 @@ class FeatureExtractor:
                     merged[:h1, :w1, :3] = frame
                     merged[:h2, w1 : w1 + w2, :3] = img
 
-                    if save:
+                    if save and output_path:
                         out.write(merged)
 
                     cv2.imshow("Fall Detection", merged)
@@ -602,13 +621,13 @@ class FeatureExtractor:
                 
         except Exception as e:
             camera_video.release()
-            if save:
+            if save and output_path:
                 out.release()
             cv2.destroyAllWindows()
             return f"Error during processing: {str(e)}"
 
         camera_video.release()
-        if save:
+        if save and output_path:
             out.release()
         cv2.destroyAllWindows()
         

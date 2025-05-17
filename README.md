@@ -57,8 +57,16 @@ To process a video file for fall detection:
 python fall_detection.py --video path/to/video.mp4 --method DifferenceMean --save
 ```
 
+To use webcam for real-time fall detection:
+
+```bash
+python fall_detection.py --webcam --camera_id 0 --method DifferenceMean --save
+```
+
 Parameters:
-- `--video`: Path to the video file (required)
+- `--video`: Path to the video file
+- `--webcam`: Use webcam as input source
+- `--camera_id`: Camera device ID (default: 0)
 - `--method`: Detection method to use (default: "DifferenceMean")
   - Available methods: "Division", "MeanDifference", "DifferenceMean", "DifferenceSum", "Mean"
 - `--save`: Flag to save the processed video with annotations
@@ -73,6 +81,9 @@ feature_extractor = FeatureExtractor()
 
 # Process a video file
 cost = feature_extractor.realTimeVideo("path/to/video.mp4", "DifferenceMean", save=True)
+
+# Or use webcam
+cost = feature_extractor.realTimeVideo("webcam:0", "DifferenceMean", save=True)
 ```
 
 ## How It Works
@@ -101,6 +112,27 @@ Run the example script to visualize all five methods on a sample video:
 ```bash
 python index.py
 ```
+
+Or try the webcam-based fall detection demo:
+
+```bash
+python webcam_demo.py
+```
+
+## Webcam Usage
+
+The system supports real-time fall detection using a webcam. You can use the dedicated webcam demo script:
+
+```bash
+python webcam_demo.py --camera_id 0 --method DifferenceMean --save
+```
+
+Tips for webcam usage:
+1. Ensure you have good lighting
+2. Position the camera to capture your full body
+3. Try to have a clear background
+4. Maintain a distance of at least 2 meters from the camera
+5. Move slowly to allow the system to track your movements accurately
 
 ## License
 
